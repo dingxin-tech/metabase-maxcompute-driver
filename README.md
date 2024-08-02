@@ -100,7 +100,7 @@ Any form of contribution is also welcome.
 ## Issues
 
 If you encounter any issues or have questions, please open
-an [issue](https://github.com/your/repository/issues) on our GitHub page. We will address it as soon
+an [issue](https://github.com/dingxin-tech/metabase-maxcompute-driver/issues) on our GitHub page. We will address it as soon
 as possible.
 
 Thank you for using the Metabase MaxCompute Driver!
