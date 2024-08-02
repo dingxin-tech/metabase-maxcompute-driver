@@ -1,0 +1,7 @@
+{:paths
+ ["src" "resources"]
+
+ :deps
+ {com.aliyun.odps/odps-jdbc {:mvn/version "3.6.0-rc0"}}
+ }
+
