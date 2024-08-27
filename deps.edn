@@ -2,7 +2,7 @@
  ["src" "resources"]
 
  :deps
- {com.aliyun.odps/odps-jdbc {:mvn/version "3.6.0-rc0"}}
+ {com.aliyun.odps/odps-jdbc {:mvn/version "3.6.0"}}
 
  ;; build the driver with clojure -X:build
  :aliases
