@@ -75,11 +75,11 @@ driver:
       placeholder:
       required: true
     - name: ak
-      display-name: Access Key ID
+      display-name: AccessID
       placeholder:
       required: true
     - name: sk
-      display-name: Access Key Secret
+      display-name: AccessKey
       placeholder:
       required: true
     - name: timezone
