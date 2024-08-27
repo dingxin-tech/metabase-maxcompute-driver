@@ -1,24 +1,21 @@
 (ns metabase.driver.maxcompute
-  (:require
-    [cheshire.core :as json]
-    [clojure.core]
-    [clojure.string :as str]
-    [honey.sql :as hsql]
-    [java-time.api :as t]
-    [metabase.driver :as driver]
-    [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
-    [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
-    [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
-    [metabase.driver.sql.query-processor :as sql.qp]
-    [metabase.util.date-2 :as u.date]
-    [metabase.util.honey-sql-2 :as h2x])
-  (:import
-    (java.sql Connection ResultSet Time)
-    (java.time LocalDate LocalDateTime OffsetDateTime ZonedDateTime)
-    (java.util Date)
-    (com.aliyun.odps Column Table Project Odps OdpsException)
-    (com.aliyun.odps.jdbc OdpsConnection)
-    (com.aliyun.odps.account AliyunAccount)))
+    (:require
+      [cheshire.core :as json]
+      [clojure.core]
+      [clojure.string :as str]
+      [honey.sql :as hsql]
+      [java-time.api :as t]
+      [metabase.driver :as driver]
+      [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
+      [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
+      [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
+      [metabase.driver.sql.query-processor :as sql.qp]
+      [metabase.driver.sql.util.unprepare :as unprepare]
+      [metabase.util.date-2 :as u.date]
+      [metabase.util.honey-sql-2 :as h2x])
+    (:import
+      (java.sql Connection ResultSet)
+      (java.time LocalDate LocalDateTime OffsetDateTime ZonedDateTime)))
 
 (set! *warn-on-reflection* true)
 
@@ -137,7 +134,7 @@
 
                               ;; Does the driver support schemas (aka namespaces) for tables
                               ;; DEFAULTS TO TRUE
-                              :schemas                                false
+                              :schemas                                true
 
                               ;; Does the driver support custom writeback actions. Drivers that support this must
                               ;; implement [[execute-write-query!]]
@@ -188,64 +185,64 @@
                               ;; functions)
                               :window-functions/offset                true
                               }]
-  (defmethod driver/database-supports? [:maxcompute feature] [_driver _feature _db] supported?))
+       (defmethod driver/database-supports? [:maxcompute feature] [_driver _feature _db] supported?))
 
 (def odps-instance (atom nil))
 (defmethod driver/can-connect? :maxcompute
-  [driver details]
-  (let [{:keys [project endpoint ak sk]} details
-        account (AliyunAccount. ak sk)
-        odps (Odps. account)]
-    (.setEndpoint odps endpoint)
-    (.setDefaultProject odps project)
-    (try
-      (let [projects (.projects odps)]
-        (.exists projects project)
-        (reset! odps-instance odps)
-        true)
-      (catch OdpsException e
-        (println "driver/can-connect? - exception:" e)
-        false))))
+           [driver details]
+           (let [{:keys [project endpoint ak sk]} details
+                 account (AliyunAccount. ak sk)
+                 odps (Odps. account)]
+                (.setEndpoint odps endpoint)
+                (.setDefaultProject odps project)
+                (try
+                  (let [projects (.projects odps)]
+                       (.exists projects project)
+                       (reset! odps-instance odps)
+                       true)
+                  (catch OdpsException e
+                    (println "driver/can-connect? - exception:" e)
+                    false))))
 
 ;; this convert "a"."b"."c" to `a`.`b`.`c`, which is necessary for maxcompute
 (defmethod sql.qp/quote-style :maxcompute [_] :mysql)
 
 (defmethod sql-jdbc.conn/connection-details->spec :maxcompute
-  [driver details-map]
-  (let [{:keys [project endpoint ak sk timezone settings]} details-map
-        ;; 将 MaxCompute SQL 的默认 settings 放在这里
-        default-settings {"odps.sql.validate.orderby.limit" "false"
-                          "odps.sql.type.system.odps2"      "true"
-                          "odps.sql.timezone"               timezone}
-        settings-map (merge default-settings (try
-                                               (when settings
-                                                 (json/parse-string settings true))
-                                               (catch Exception e
-                                                 (println "Invalid settings JSON" settings)
-                                                 {})))]
-    (if (or (nil? endpoint) (nil? project) (nil? ak) (nil? sk))
-      (throw (IllegalArgumentException. "Missing required connection details"))
-      {:classname   "com.aliyun.odps.jdbc.OdpsDriver"
-       :subprotocol "odps"
-       :subname     (str endpoint "?project=" project
-                         "&enableOdpsLogger=true&charset=UTF-8&interactiveMode=true&enableLimit=false"
-                         "&settings=" (json/generate-string settings-map))
-       :user        ak
-       :password    sk})))
+           [driver details-map]
+           (let [{:keys [project endpoint ak sk timezone settings]} details-map
+                 ;; 将 MaxCompute SQL 的默认 settings 放在这里
+                 default-settings {"odps.sql.validate.orderby.limit" "false"
+                                   "odps.sql.type.system.odps2"      "true"
+                                   "odps.sql.timezone"               (or timezone "Asia/Shanghai")}
+                 settings-map (merge default-settings (try
+                                                        (when settings
+                                                              (json/parse-string settings true))
+                                                        (catch Exception e
+                                                          (println "Invalid settings JSON" settings)
+                                                          {})))]
+                (if (or (nil? endpoint) (nil? project) (nil? ak) (nil? sk))
+                  (throw (IllegalArgumentException. "Missing required connection details"))
+                  {:classname   "com.aliyun.odps.jdbc.OdpsDriver"
+                   :subprotocol "odps"
+                   :subname     (str endpoint "?project=" project
+                                     "&enableOdpsLogger=true&charset=UTF-8&interactiveMode=true&enableLimit=false"
+                                     "&settings=" (json/generate-string settings-map))
+                   :user        ak
+                   :password    sk})))
 (defmethod driver/describe-database :maxcompute
-  [driver database]
-  (let [odps @odps-instance
-        tables-it (.iterator (.tables odps))]
-    (loop [tables-metadata #{}]
-      (if (.hasNext tables-it)
-        (let [table (.next tables-it)
-              table-metadata {:name                    (.getName table)
-                              :schema                  (.getDefaultProject odps)
-                              :description             (.getComment table)
-                              :database_require_filter (.isPartitioned table)}]
-          (println "table-metadata:" table-metadata)
-          (recur (conj tables-metadata table-metadata)))
-        {:tables tables-metadata}))))
+           [driver database]
+           (let [odps @odps-instance
+                 tables-it (.iterator (.tables odps))]
+                (loop [tables-metadata #{}]
+                      (if (.hasNext tables-it)
+                        (let [table (.next tables-it)
+                              table-metadata {:name                    (.getName table)
+                                              :schema                  (or (.getSchemaName table) (.getDefaultProject odps))
+                                              :description             (.getComment table)
+                                              :database_require_filter (.isPartitioned table)}]
+                             (println "table-metadata:" table-metadata)
+                             (recur (conj tables-metadata table-metadata)))
+                        {:tables tables-metadata}))))
 (def ^:private database-type->base-type
   (sql-jdbc.sync/pattern-based-database-type->base-type
     [[#"BIGINT" :type/BigInteger]
@@ -271,54 +268,54 @@
 
      ]))
 (defmethod sql-jdbc.sync/database-type->base-type :maxcompute
-  [_ database-type]
-  (database-type->base-type database-type))
+           [_ database-type]
+           (database-type->base-type database-type))
 
 ;; maxcompute's JDBC driver is fussy and won't let you change connections to read-only after you create them. So skip that
 ;; step. maxcompute doesn't have a notion of session timezones so don't do that either. The only thing we're doing here from
 ;; the default impl is setting the transaction isolation level
 (defmethod sql-jdbc.execute/do-with-connection-with-options :maxcompute
-  [driver db-or-id-or-spec options f]
-  (sql-jdbc.execute/do-with-resolved-connection
-    driver
-    db-or-id-or-spec
-    options
-    (fn [^Connection conn]
-      (f conn))))
+           [driver db-or-id-or-spec options f]
+           (sql-jdbc.execute/do-with-resolved-connection
+             driver
+             db-or-id-or-spec
+             options
+             (fn [^Connection conn]
+                 (f conn))))
 
 ;; maxcompute's JDBC driver is dumb and complains if you try to call `.setFetchDirection` on the Connection
 (defmethod sql-jdbc.execute/prepared-statement :maxcompute
-  [driver ^Connection conn ^String sql params]
-  (let [stmt (.prepareStatement conn sql
-                                ResultSet/TYPE_FORWARD_ONLY
-                                ResultSet/CONCUR_READ_ONLY)]
-    (try
-      (sql-jdbc.execute/set-parameters! driver stmt params)
-      stmt
-      (catch Throwable e
-        (.close stmt)
-        (throw e)))))
+           [driver ^Connection conn ^String sql params]
+           (let [stmt (.prepareStatement conn sql
+                                         ResultSet/TYPE_FORWARD_ONLY
+                                         ResultSet/CONCUR_READ_ONLY)]
+                (try
+                  (sql-jdbc.execute/set-parameters! driver stmt params)
+                  stmt
+                  (catch Throwable e
+                    (.close stmt)
+                    (throw e)))))
 (defmethod sql.qp/->honeysql [:maxcompute :datetime-diff]
-  [driver [_ x y unit]]
-  (let [x (sql.qp/->honeysql driver x)
-        y (sql.qp/->honeysql driver y)]
-    (:raw (if (nil? unit)
-      (str "DATEDIFF(" x ", " y ")")
-      (str "DATEDIFF(" x ", " y ", '-" unit "')")))))
+           [driver [_ x y unit]]
+           (let [x (sql.qp/->honeysql driver x)
+                 y (sql.qp/->honeysql driver y)]
+                (:raw (if (nil? unit)
+                        (str "DATEDIFF(" x ", " y ")")
+                        (str "DATEDIFF(" x ", " y ", '-" unit "')")))))
 
 ;; below code is copy from https://github.com/jess0018/metabase-odps-driver/blob/master/src/metabase/driver/odps.clj
 (defmethod sql.qp/current-datetime-honeysql-form :maxcompute [_] (:raw "getdate()"))
 (defmethod sql.qp/unix-timestamp->honeysql [:maxcompute :seconds]
-  [_ _ expr]
-  (h2x/->timestamp (hsql/call :from_unixtime expr)))
+           [_ _ expr]
+           (h2x/->timestamp (hsql/call :from_unixtime expr)))
 
 (defn- date-format [format-str expr]
-  (hsql/call :to_char expr (h2x/literal format-str)))
+       (hsql/call :to_char expr (h2x/literal format-str)))
 
 (defn- str-to-date [format-str expr] (hsql/call :to_date expr (h2x/literal format-str)))
 
 (defn- trunc-with-format [format-str expr]
-  (str-to-date format-str (date-format format-str (h2x/cast :DATETIME expr))))
+       (str-to-date format-str (date-format format-str (h2x/cast :DATETIME expr))))
 
 (defmethod sql.qp/date [:maxcompute :second] [_ _ expr] (trunc-with-format "yyyy-mm-dd hh:mi:ss" expr))
 (defmethod sql.qp/date [:maxcompute :minute] [_ _ expr] (trunc-with-format "yyyy-mm-dd hh:mi" expr))
@@ -334,32 +331,30 @@
 (defmethod sql.qp/date [:maxcompute :year] [_ _ expr] (trunc-with-format "yyyy" expr))
 
 (defmethod sql.qp/date [:maxcompute :quarter] [_ _ expr]
-  (hsql/call :dateadd (hsql/call :datetrunc expr (h2x/literal "yyyy"))
-             (h2x/* (h2x/- ((hsql/call :quarter expr)) 1) 3)
-             (h2x/literal "mm")
-             ))
+           (hsql/call :dateadd (hsql/call :datetrunc expr (h2x/literal "yyyy"))
+                      (h2x/* (h2x/- ((hsql/call :quarter expr)) 1) 3)
+                      (h2x/literal "mm")
+                      ))
 
 (defmethod sql.qp/date [:maxcompute :quarter-of-year] [_ _ expr]
-  (hsql/call :ceil (h2x// (hsql/call :datepart expr (h2x/literal "mm")) 3)))
+           (hsql/call :ceil (h2x// (hsql/call :datepart expr (h2x/literal "mm")) 3)))
 
 
-(prefer-method sql.qp/inline-value [:sql Time] [:maxcompute Date])
+(defmethod unprepare/unprepare-value [:maxcompute String] [_ value]
+           (str \' (str/replace value "'" "\\\\'") \'))
 
-(defmethod sql.qp/inline-value [:maxcompute String] [_ value]
-  (str \' (str/replace value "'" "\\\\'") \'))
+(defmethod unprepare/unprepare-value [:odps LocalDate]
+           [driver t]
+           (unprepare/unprepare-value driver (t/local-date-time t (t/local-time 0))))
 
-(defmethod sql.qp/inline-value [:odps LocalDate]
-  [driver t]
-  (sql.qp/inline-value driver (t/local-date-time t (t/local-time 0))))
+(defmethod unprepare/unprepare-value [:odps LocalDateTime]
+           [_ t]
+           (format "to_date('%s', 'yyyy-mm-dd hh:mi:ss')" (u.date/format-sql (t/local-date-time t))))
 
-(defmethod sql.qp/inline-value [:odps LocalDateTime]
-  [_ t]
-  (format "to_date('%s', 'yyyy-mm-dd hh:mi:ss')" (u.date/format-sql (t/local-date-time t))))
+(defmethod unprepare/unprepare-value [:odps OffsetDateTime]
+           [_ t]
+           (format "to_date('%s', 'yyyy-mm-dd hh:mi:ss')" (u.date/format-sql (t/local-date-time t))))
 
-(defmethod sql.qp/inline-value [:odps OffsetDateTime]
-  [_ t]
-  (format "to_date('%s', 'yyyy-mm-dd hh:mi:ss')" (u.date/format-sql (t/local-date-time t))))
-
-(defmethod sql.qp/inline-value [:odps ZonedDateTime]
-  [_ t]
-  (format "to_date('%s', 'yyyy-mm-dd hh:mi:ss')" (u.date/format-sql (t/local-date-time t))))
+(defmethod unprepare/unprepare-value [:odps ZonedDateTime]
+           [_ t]
+           (format "to_date('%s', 'yyyy-mm-dd hh:mi:ss')" (u.date/format-sql (t/local-date-time t))))

@@ -84,7 +84,7 @@ driver:
       required: true
     - name: timezone
       display-name: timezone
-      placeholder: UTC
+      placeholder: Asia/Shanghai
       required: false
     - advanced-options-start
     - default-advanced-options
