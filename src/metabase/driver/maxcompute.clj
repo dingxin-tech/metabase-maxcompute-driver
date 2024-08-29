@@ -10,12 +10,16 @@
       [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
       [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
       [metabase.driver.sql.query-processor :as sql.qp]
-      [metabase.driver.sql.util.unprepare :as unprepare]
       [metabase.util.date-2 :as u.date]
+      [metabase.driver.sql.util.unprepare :as unprepare]
       [metabase.util.honey-sql-2 :as h2x])
     (:import
-      (java.sql Connection ResultSet)
-      (java.time LocalDate LocalDateTime OffsetDateTime ZonedDateTime)))
+      (java.sql Connection ResultSet Time)
+      (java.time LocalDate LocalDateTime OffsetDateTime ZonedDateTime)
+      (java.util Date)
+      (com.aliyun.odps Column Table Project Odps OdpsException)
+      (com.aliyun.odps.jdbc OdpsConnection)
+      (com.aliyun.odps.account AliyunAccount)))
 
 (set! *warn-on-reflection* true)
 
@@ -134,7 +138,7 @@
 
                               ;; Does the driver support schemas (aka namespaces) for tables
                               ;; DEFAULTS TO TRUE
-                              :schemas                                true
+                              :schemas                                false
 
                               ;; Does the driver support custom writeback actions. Drivers that support this must
                               ;; implement [[execute-write-query!]]
@@ -190,11 +194,12 @@
 (def odps-instance (atom nil))
 (defmethod driver/can-connect? :maxcompute
            [driver details]
-           (let [{:keys [project endpoint ak sk]} details
+           (let [{:keys [project endpoint ak sk namespace-schema]} details
                  account (AliyunAccount. ak sk)
                  odps (Odps. account)]
                 (.setEndpoint odps endpoint)
                 (.setDefaultProject odps project)
+                (.setCurrentSchema odps (if namespace-schema "default" nil))
                 (try
                   (let [projects (.projects odps)]
                        (.exists projects project)
@@ -209,10 +214,12 @@
 
 (defmethod sql-jdbc.conn/connection-details->spec :maxcompute
            [driver details-map]
-           (let [{:keys [project endpoint ak sk timezone settings]} details-map
+           (let [{:keys [project endpoint ak sk timezone settings namespace-schema]} details-map
                  ;; 将 MaxCompute SQL 的默认 settings 放在这里
                  default-settings {"odps.sql.validate.orderby.limit" "false"
                                    "odps.sql.type.system.odps2"      "true"
+                                   "odps.sql.allow.fullscan"         "true"
+                                   "odps.namespace.schema"           (if namespace-schema "true" "false")
                                    "odps.sql.timezone"               (or timezone "Asia/Shanghai")}
                  settings-map (merge default-settings (try
                                                         (when settings
@@ -225,10 +232,11 @@
                   {:classname   "com.aliyun.odps.jdbc.OdpsDriver"
                    :subprotocol "odps"
                    :subname     (str endpoint "?project=" project
-                                     "&enableOdpsLogger=true&charset=UTF-8&interactiveMode=true&enableLimit=false"
+                                     "&enableOdpsLogger=true&charset=UTF-8&interactiveMode=true&enableLimit=false&odpsNamespaceSchema=false"
                                      "&settings=" (json/generate-string settings-map))
                    :user        ak
                    :password    sk})))
+
 (defmethod driver/describe-database :maxcompute
            [driver database]
            (let [odps @odps-instance
@@ -237,7 +245,7 @@
                       (if (.hasNext tables-it)
                         (let [table (.next tables-it)
                               table-metadata {:name                    (.getName table)
-                                              :schema                  (or (.getSchemaName table) (.getDefaultProject odps))
+                                              :schema                 (.getProject table)
                                               :description             (.getComment table)
                                               :database_require_filter (.isPartitioned table)}]
                              (println "table-metadata:" table-metadata)
