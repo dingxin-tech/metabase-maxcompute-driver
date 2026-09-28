@@ -1,10 +1,28 @@
 # Metabase MaxCompute Driver
 
-> **Note**: This driver is in its early stages and has not undergone extensive testing. Features
-> have been validated through self-testing, but production environment testing has not been
-> completed.
-> The developer is not an advanced Metabase user, so full functionality cannot be guaranteed. If you
-> encounter any issues, please open an issue, and we will address it as soon as possible.
+> [!WARNING]
+> **This repository is deprecated and no longer maintained.** The last release here,
+> `1.0.0-SNAPSHOT-0.0.2`, was published on 2024-08-29 and was built against Metabase 0.50 with
+> ODPS JDBC 3.6.0. It is outside the supported window of the maintained driver, is not tested
+> against any newer Metabase release, and defects in it are not fixed here.
+>
+> The MaxCompute driver for Metabase is maintained in one place: the
+> [`metabase-maxcompute-driver`](https://github.com/aliyun/aliyun-maxcompute-data-collectors/tree/master/metabase-maxcompute-driver)
+> directory of
+> [`aliyun/aliyun-maxcompute-data-collectors`](https://github.com/aliyun/aliyun-maxcompute-data-collectors).
+> That directory is the source of truth for release assets (GitHub Releases tagged
+> `metabase-<driver-version>`, with `SHA256SUMS`, SBOM and build provenance), the supported
+> Metabase window and verification matrix (`compatibility.yaml`), install and build instructions,
+> and issue intake.
+>
+> If you already have `maxcompute.metabase-driver.jar` in your `plugins` directory, replace it with
+> the current driver JAR and remove any ODPS JDBC JAR installed beside it.
+
+One defect to know about before installing anything from this repository: a query that returns an
+`ARRAY` column fails with `class java.util.ArrayList cannot be cast to class java.sql.Array`,
+because `ResultSet.getObject()` on such columns did not return the type the driver declared. It is
+fixed in driver 0.1.1 of the maintained project, not here. Until you switch, project those
+columns as text (for example `TO_JSON(col)`) instead of selecting them raw.
 
 ## Installation
 
@@ -16,8 +34,11 @@ variable `MB_PLUGINS_DIR`.
 
 1. Download a fairly recent Metabase binary release (jar file) from
    the [Metabase distribution page](https://metabase.com/start/jar.html).
-2. Download the MaxCompute driver jar from this
-   repository's ["Releases"](https://github.com/dingxin-tech/metabase-maxcompute-driver/releases) page.
+2. Download the MaxCompute driver jar from the maintained project's
+   ["Releases"](https://github.com/aliyun/aliyun-maxcompute-data-collectors/releases) page (the asset is
+   `maxcompute-metabase-driver-<driver-version>.jar`). The
+   ["Releases"](https://github.com/dingxin-tech/metabase-maxcompute-driver/releases) of this repository are
+   legacy builds for Metabase 0.50 and are not maintained; install the maintained artifact instead.
 3. Create a directory and copy the `metabase.jar` to it.
 4. In that directory create a sub-directory called `plugins`.
 5. Copy the MaxCompute driver jar to the `plugins` directory.
@@ -51,6 +72,10 @@ consult the Alibaba Cloud documentation.
 - [Install Metabase core](https://github.com/metabase/metabase/wiki/Writing-a-Driver:-Packaging-a-Driver-&-Metabase-Plugin-Basics#installing-metabase-core-locally)
 
 ### Build from Source
+
+Build the driver from the [maintained source](https://github.com/aliyun/aliyun-maxcompute-data-collectors/tree/master/metabase-maxcompute-driver)
+with the reproducible build script documented there. The steps below apply only to this legacy tree
+and are kept for reference.
 
 1. Clone the repository:
 
@@ -99,8 +124,8 @@ Any form of contribution is also welcome.
 
 ## Issues
 
-If you encounter any issues or have questions, please open
-an [issue](https://github.com/dingxin-tech/metabase-maxcompute-driver/issues) on our GitHub page. We will address it as soon
-as possible.
+If you encounter any issues or have questions, please open an issue in the
+[maintained project](https://github.com/aliyun/aliyun-maxcompute-data-collectors/issues); Metabase driver reports are
+triaged against the `metabase-maxcompute-driver` component. Issues opened in this repository are not triaged.
 
 Thank you for using the Metabase MaxCompute Driver!
